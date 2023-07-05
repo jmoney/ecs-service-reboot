@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"time"
@@ -11,27 +12,40 @@ import (
 )
 
 var (
-	logger      *log.Logger
-	cluster     string
-	serviceName string
+	logger *log.Logger
 )
 
 func init() {
 	logger = log.New(os.Stdout, "[INFO] ", log.Ldate|log.Ltime|log.Lshortfile)
-	cluster = os.Getenv("CLUSTER")
-	serviceName = os.Getenv("SERVICE_NAME")
+}
+
+// returns a boolean if string is nil or empty
+func isEmpty(s *string) bool {
+	return s == nil || len(*s) == 0
 }
 
 func main() {
+	cluster := flag.String("cluster", os.Getenv("CLUSTER"), "ECS cluster name")
+	serviceName := flag.String("service", os.Getenv("SERVICE_NAME"), "ECS service name")
+	awsRegion := flag.String("region", os.Getenv("AWS_REGION"), "AWS region")
+	flag.Parse()
+
+	if isEmpty(cluster) || isEmpty(serviceName) || isEmpty(awsRegion) {
+		panic("Missing required parameters")
+	}
 	var err error
-	sess := session.Must(session.NewSession())
+	sess := session.Must(session.NewSession(
+		&aws.Config{
+			Region: awsRegion,
+		},
+	))
 
 	svc := ecs.New(sess)
 
-	logger.Printf("Rebooting ecs service")
+	logger.Printf("Rebooting ecs service \"%s\" in cluster \"%s\"", *serviceName, *cluster)
 	_, err = svc.UpdateService(&ecs.UpdateServiceInput{
-		Cluster:            aws.String(cluster),
-		Service:            aws.String(serviceName),
+		Cluster:            cluster,
+		Service:            serviceName,
 		ForceNewDeployment: aws.Bool(true),
 	})
 
@@ -43,8 +57,8 @@ func main() {
 		time.Sleep(5 * time.Second)
 
 		service, err := svc.DescribeServices(&ecs.DescribeServicesInput{
-			Cluster:  aws.String(cluster),
-			Services: []*string{aws.String(serviceName)},
+			Cluster:  cluster,
+			Services: []*string{serviceName},
 		})
 
 		if err == nil {
